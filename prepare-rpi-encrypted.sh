@@ -118,13 +118,28 @@ trap cleanup EXIT
 [[ $EUID -eq 0 ]] || die "Run as root (sudo)."
 
 for t in cryptsetup parted blkid rsync sgdisk mkfs.vfat mkfs.ext4 losetup \
-         qemu-aarch64-static update-binfmts; do
+         qemu-aarch64-static; do
   command -v "$t" >/dev/null 2>&1 || die "Missing tool: $t  (see prerequisites in the README)"
 done
 
 # Confirm aarch64 emulation is registered so the chroot can run ARM binaries.
-update-binfmts --display qemu-aarch64 >/dev/null 2>&1 \
-  || die "qemu-aarch64 binfmt not registered. Install/enable qemu-user-static + binfmt-support."
+# Accept either the Debian/binfmt-support registration or a systemd-binfmt one.
+aarch64_binfmt_ok() {
+  update-binfmts --display qemu-aarch64 2>/dev/null | grep -q enabled && return 0
+  local f
+  for f in /proc/sys/fs/binfmt_misc/*aarch64* /proc/sys/fs/binfmt_misc/qemu-aarch64; do
+    [[ -f "$f" ]] && grep -q '^enabled' "$f" && return 0
+  done
+  return 1
+}
+if ! aarch64_binfmt_ok; then
+  die "aarch64 emulation is not registered. On Debian/Ubuntu run:
+    sudo apt install -y qemu-user-static binfmt-support
+    sudo systemctl restart systemd-binfmt 2>/dev/null || true
+    sudo update-binfmts --enable qemu-aarch64 2>/dev/null || true
+  If /proc/sys/fs/binfmt_misc is not mounted:
+    sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc"
+fi
 
 # Interactive disk selection (skipped for any device preset via env var).
 log "Detected disks on this machine:"
